@@ -12,30 +12,28 @@ public class ControladorEntidadCorrupta : MonoBehaviour
     [Header("Habilidades")]
     public float cooldownGolpe = 3f;
     public float cooldownRayo = 5f;
-    public float cooldownCarga = 7f;
-    private float tiempoGolpe, tiempoRayo, tiempoCarga;
+    private float tiempoGolpe, tiempoRayo;
 
     [Header("Efectos Visuales")]
     public GameObject efectoGolpe;
     public GameObject efectoRayo;
-    public GameObject efectoCargar;
 
     [Header("Movimiento")]
-    public float distanciaAtaque = 10f;
+    public float distanciaAtaque = 3f; // distancia para atacar cuerpo a cuerpo
     public float velocidadMovimiento = 3f;
-    public float velocidadGiro = 2f;
+    public float velocidadGiro = 5f;
+    private bool enCombate = false;
 
     [Header("Interfaz de Vida")]
     public Slider barraVidaEntidad;
-    public Slider barraVidaJugador;
-    public float vidaJugador = 500f;
-    private float vidaActualJugador;
+
+    [Header("Detector de Combate")]
+    public SphereCollider detectorCombate;
 
     private void Start()
     {
         vidaActual = vidaMaxima;
-        vidaActualJugador = vidaJugador;
-        ActualizarBarrasDeVida();
+        ActualizarBarraDeVida();
     }
 
     private void Update()
@@ -46,81 +44,102 @@ public class ControladorEntidadCorrupta : MonoBehaviour
             return;
         }
 
-        ControlarMovimiento();
-        ControlarHabilidades();
-        ControlarRegeneracion();
-        ActualizarBarrasDeVida();
+        if (enCombate && objetivo != null)
+        {
+            MoverYAtacar();
+        }
+        else
+        {
+            animador.SetBool("EstaCaminando", false);
+        }
     }
 
-    void ControlarMovimiento()
+    private void OnTriggerEnter(Collider other)
     {
-        if (objetivo == null) return;
+        if (other.CompareTag("Player"))
+        {
+            objetivo = other.transform;
+            enCombate = true;
+        }
+    }
 
+    private void OnTriggerExit(Collider other)
+    {
+        if (other.CompareTag("Player"))
+        {
+            enCombate = false;
+            animador.SetBool("EstaCaminando", false);
+            objetivo = null;
+        }
+    }
+
+    void MoverYAtacar()
+    {
         Vector3 direccion = objetivo.position - transform.position;
+        direccion.y = 0;
+
         float distancia = direccion.magnitude;
 
         if (distancia > distanciaAtaque)
         {
-            direccion.y = 0;
+            // Caminar hacia el jugador
             transform.position += direccion.normalized * velocidadMovimiento * Time.deltaTime;
+            animador.SetBool("EstaCaminando", true);
         }
-
-        Quaternion rotacionObjetivo = Quaternion.LookRotation(direccion);
-        transform.rotation = Quaternion.Slerp(transform.rotation, rotacionObjetivo, velocidadGiro * Time.deltaTime);
-    }
-
-    void ControlarHabilidades()
-    {
-        if (Vector3.Distance(transform.position, objetivo.position) <= distanciaAtaque)
+        else
         {
+            animador.SetBool("EstaCaminando", false);
+
+            // Atacar solo si el cooldown paso y estamos en rango
             if (Time.time >= tiempoGolpe)
             {
-                GolpePesado();
+                animador.SetTrigger("GolpePesado");
                 tiempoGolpe = Time.time + cooldownGolpe;
             }
 
             if (Time.time >= tiempoRayo)
             {
-                RayoOscuro();
+                animador.SetTrigger("RayoOscuro");
                 tiempoRayo = Time.time + cooldownRayo;
             }
+        }
 
-            if (Time.time >= tiempoCarga)
-            {
-                CargarFerozmente();
-                tiempoCarga = Time.time + cooldownCarga;
-            }
+        // Girar hacia el jugador suavemente
+        if (direccion != Vector3.zero)
+        {
+            Quaternion rotacionObjetivo = Quaternion.LookRotation(direccion);
+            transform.rotation = Quaternion.Slerp(transform.rotation, rotacionObjetivo, velocidadGiro * Time.deltaTime);
         }
     }
 
-    void GolpePesado()
+    // Métodos que llamarán los Animation Events para activar los efectos visuales en el momento exacto de la animación
+
+    public void EfectoGolpe()
     {
-        animador.SetTrigger("GolpePesado");
-        Instantiate(efectoGolpe, transform.position, transform.rotation);
-        if (Vector3.Distance(transform.position, objetivo.position) <= 3f)
+        if (efectoGolpe != null)
         {
-            objetivo.GetComponent<Jugador>()?.RecibirDanio(50f);
+            Vector3 posicionEfecto = transform.position + transform.forward * 1.5f + Vector3.up * 1f; 
+            Instantiate(efectoGolpe, posicionEfecto, transform.rotation);
         }
     }
 
-    void RayoOscuro()
+    public void EfectoRayo()
     {
-        animador.SetTrigger("RayoOscuro");
-        Instantiate(efectoRayo, transform.position, transform.rotation);
-        objetivo.GetComponent<Jugador>()?.RecibirDanio(20f);
-    }
-
-    void CargarFerozmente()
-    {
-        animador.SetTrigger("Cargar");
-        Instantiate(efectoCargar, transform.position, transform.rotation);
-    }
-
-    void ControlarRegeneracion()
-    {
-        if (vidaActual < vidaMaxima)
+        if (efectoRayo != null)
         {
-            vidaActual += 10f * Time.deltaTime;
+            Vector3 posicionEfecto = transform.position + transform.forward * 2f + Vector3.up * 1.5f; 
+            Instantiate(efectoRayo, posicionEfecto, transform.rotation);
+        }
+    }
+
+    public void RecibirDanio(float danio)
+    {
+        vidaActual -= danio;
+        ActualizarBarraDeVida();
+
+        if (vidaActual <= 0)
+        {
+            Morir();
         }
     }
 
@@ -128,20 +147,14 @@ public class ControladorEntidadCorrupta : MonoBehaviour
     {
         animador.SetTrigger("Morir");
         Destroy(gameObject, 2f);
+        enCombate = false;
     }
 
-    public void RecibirDanio(float danio)
+    void ActualizarBarraDeVida()
     {
-        vidaActual -= danio;
-        if (vidaActual <= vidaMaxima * 0.5f)
+        if (barraVidaEntidad != null)
         {
-            animador.SetBool("Debilitado", true);
+            barraVidaEntidad.value = vidaActual / vidaMaxima;
         }
-    }
-
-    void ActualizarBarrasDeVida()
-    {
-        if (barraVidaEntidad) barraVidaEntidad.value = vidaActual / vidaMaxima;
-        if (barraVidaJugador) barraVidaJugador.value = vidaActualJugador / vidaJugador;
     }
 }
